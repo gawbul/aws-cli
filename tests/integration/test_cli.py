@@ -11,6 +11,7 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 import time
+import signal
 import os
 import tempfile
 import random
@@ -18,11 +19,13 @@ import shutil
 
 import botocore.session
 from awscli.testutils import unittest, aws, BaseS3CLICommand
+from awscli.testutils import temporary_file
+from awscli.testutils import skip_if_windows
 from awscli.clidriver import create_clidriver
 
 
 def test_no_shadowed_builtins():
-    """Verify no command params are shadowed by the built in param.
+    """Verify no command params are shadowed or prefixed by the built in param.
 
     The CLI parses all command line options into a single namespace.
     This means that option names must be unique and cannot conflict
@@ -32,6 +35,11 @@ def test_no_shadowed_builtins():
     operation for a service also provides a ``--version`` option,
     it can never be called because we'll assume the user meant
     the top level ``--version`` param.
+
+    Beyond just direct shadowing, a param which prefixes a builtin
+    is also effectively shadowed because argparse will expand
+    prefixes of arguments. So `--end` would expand to `--endpoint-url`
+    for instance.
 
     In order to ensure this doesn't happen, this test will go
     through every command table and ensure we're not shadowing
@@ -53,11 +61,12 @@ def test_no_shadowed_builtins():
                 op_help = sub_command.create_help_command()
                 arg_table = op_help.arg_table
                 for arg_name in arg_table:
-                    if arg_name in top_level_params:
-                        # Then we're shadowing a built in argument.
+                    if any(p.startswith(arg_name) for p in top_level_params):
+                        # Then we are shadowing or prefixing a top level
+                        # argument.
                         errors.append(
-                            'Shadowing a top level option: %s.%s.%s' % (
-                                command_name, sub_name, arg_name))
+                            'Shadowing/Prefixing a top level option: '
+                            '%s.%s.%s' % (command_name, sub_name, arg_name))
 
     if errors:
         raise AssertionError('\n' + '\n'.join(errors))
@@ -115,6 +124,24 @@ class TestBasicCommandFunctionality(unittest.TestCase):
         # 'The describe-instances operation'.
         self.assertRegexpMatches(p.stdout,
                                  '\s+Describes\s+one\s+or\s+more')
+
+    def test_topic_list_help_output(self):
+        p = aws('help topics')
+        self.assertEqual(p.rc, 0)
+        self.assertRegexpMatches(p.stdout, '\s+AWS\s+CLI\s+Topic\s+Guide')
+        self.assertRegexpMatches(
+            p.stdout,
+            '\s+This\s+is\s+the\s+AWS\s+CLI\s+Topic\s+Guide'
+        )
+
+    def test_topic_help_output(self):
+        p = aws('help return-codes')
+        self.assertEqual(p.rc, 0)
+        self.assertRegexpMatches(p.stdout, '\s+AWS\s+CLI\s+Return\s+Codes')
+        self.assertRegexpMatches(
+            p.stdout,
+            'These\s+are\s+the\s+following\s+return\s+codes'
+        )
 
     def test_operation_help_with_required_arg(self):
         p = aws('s3api get-object help')
@@ -248,13 +275,13 @@ class TestBasicCommandFunctionality(unittest.TestCase):
     def test_help_usage_top_level(self):
         p = aws('')
         self.assertIn('usage: aws [options] <command> '
-                      '<subcommand> [parameters]', p.stderr)
+                      '<subcommand> [<subcommand> ...] [parameters]', p.stderr)
         self.assertIn('aws: error', p.stderr)
 
     def test_help_usage_service_level(self):
         p = aws('ec2')
         self.assertIn('usage: aws [options] <command> '
-                      '<subcommand> [parameters]', p.stderr)
+                      '<subcommand> [<subcommand> ...] [parameters]', p.stderr)
         # python3: aws: error: the following arguments are required: operation
         # python2: aws: error: too few arguments
         # We don't care too much about the specific error message, as long
@@ -264,7 +291,7 @@ class TestBasicCommandFunctionality(unittest.TestCase):
     def test_help_usage_operation_level(self):
         p = aws('ec2 run-instances')
         self.assertIn('usage: aws [options] <command> '
-                      '<subcommand> [parameters]', p.stderr)
+                      '<subcommand> [<subcommand> ...] [parameters]', p.stderr)
 
     def test_unknown_argument(self):
         p = aws('ec2 describe-instances --filterss')
@@ -333,6 +360,17 @@ class TestBasicCommandFunctionality(unittest.TestCase):
         environ['AWS_CONFIG_FILE'] = 'nowhere-foo'
         p = aws('ec2 describe-instances', env_vars=environ)
         self.assertIn('must specify a region', p.stderr)
+
+    @skip_if_windows('Ctrl-C not supported on windows.')
+    def test_ctrl_c_does_not_print_traceback(self):
+        # Relying on the fact that this generally takes
+        # more than 1 second to complete.
+        process = aws('ec2 describe-images', wait_for_finish=False)
+        time.sleep(1)
+        process.send_signal(signal.SIGINT)
+        stdout, stderr = process.communicate()
+        self.assertNotIn(b'Traceback', stdout)
+        self.assertNotIn(b'Traceback', stderr)
 
 
 class TestCommandLineage(unittest.TestCase):
@@ -474,6 +512,69 @@ class TestGlobalArgs(BaseS3CLICommand):
         p = aws('s3api head-object --bucket %s --key private --no-sign-request'
                 % bucket_name, env_vars=env)
         self.assertEqual(p.rc, 255)
+
+    def test_profile_arg_has_precedence_over_env_vars(self):
+        # At a high level, we're going to set access_key/secret_key
+        # via env vars, but ensure that a --profile <foo> results
+        # in creds being retrieved from the shared creds file
+        # and not from env vars.
+        env_vars = os.environ.copy()
+        with temporary_file('w') as f:
+            env_vars.pop('AWS_PROFILE', None)
+            env_vars.pop('AWS_DEFAULT_PROFILE', None)
+            # 'aws configure list' only shows 4 values
+            # from the credentials so we'll show
+            # 4 char values.
+            env_vars['AWS_ACCESS_KEY_ID'] = 'enva'
+            env_vars['AWS_SECRET_ACCESS_KEY'] = 'envb'
+            env_vars['AWS_SHARED_CREDENTIALS_FILE'] = f.name
+            env_vars['AWS_CONFIG_FILE'] = 'does-not-exist-foo'
+            f.write(
+                '[from_argument]\n'
+                'aws_access_key_id=proa\n'
+                'aws_secret_access_key=prob\n'
+            )
+            f.flush()
+            p = aws('configure list --profile from_argument',
+                    env_vars=env_vars)
+            # 1. We should see the profile name being set.
+            self.assertIn('from_argument', p.stdout)
+            # 2. The creds should be proa/prob, which come
+            #    from the "from_argument" profile.
+            self.assertIn('proa', p.stdout)
+            self.assertIn('prob', p.stdout)
+            self.assertIn('shared-credentials-file', p.stdout)
+
+    def test_profile_arg_wins_over_profile_env_var(self):
+        env_vars = os.environ.copy()
+        with temporary_file('w') as f:
+            # Remove existing profile related env vars.
+            env_vars.pop('AWS_PROFILE', None)
+            env_vars.pop('AWS_DEFAULT_PROFILE', None)
+            env_vars['AWS_SHARED_CREDENTIALS_FILE'] = f.name
+            env_vars['AWS_CONFIG_FILE'] = 'does-not-exist-foo'
+            f.write(
+                '[from_env_var]\n'
+                'aws_access_key_id=enva\n'
+                'aws_secret_access_key=envb\n'
+                '\n'
+                '[from_argument]\n'
+                'aws_access_key_id=proa\n'
+                'aws_secret_access_key=prob\n'
+            )
+            f.flush()
+            # Now we set the current profile via env var:
+            env_vars['AWS_PROFILE'] = 'from_env_var'
+            # If we specify the --profile argument, that
+            # value should win over the AWS_PROFILE env var.
+            p = aws('configure list --profile from_argument',
+                    env_vars=env_vars)
+            # 1. We should see the profile name being set.
+            self.assertIn('from_argument', p.stdout)
+            # 2. The creds should be profa/profb, which come
+            #    from the "from_argument" profile.
+            self.assertIn('proa', p.stdout)
+            self.assertIn('prob', p.stdout)
 
 
 if __name__ == '__main__':

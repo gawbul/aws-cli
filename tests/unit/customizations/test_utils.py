@@ -13,6 +13,7 @@
 from awscli.testutils import unittest
 from awscli.testutils import BaseAWSHelpOutputTest
 
+import argparse
 import mock
 from botocore.exceptions import ClientError
 
@@ -39,6 +40,52 @@ class TestCommandTableRenames(BaseAWSHelpOutputTest):
         self.assert_contains('run-instances')
 
 
+class TestCommandTableAlias(BaseAWSHelpOutputTest):
+
+    def test_alias_command_table(self):
+        handler = lambda command_table, **kwargs: utils.alias_command(
+            command_table, 'ec2', 'foo')
+        # Verify that we can alias a top level command.
+        self.session.register('building-command-table.main', handler)
+        self.driver.main(['foo', 'help'])
+        self.assert_contains('foo')
+
+        # We can also see subcommands help as well.
+        self.driver.main(['foo', 'run-instances', 'help'])
+        self.assert_contains('run-instances')
+
+        # Verify that the old is still available
+        self.session.register('building-command-table.main', handler)
+        self.driver.main(['ec2', 'help'])
+        self.assert_contains('ec2')
+
+        self.driver.main(['ec2', 'run-instances', 'help'])
+        self.assert_contains('run-instances')
+
+
+class TestHiddenAlias(unittest.TestCase):
+    def test_not_marked_as_required_if_not_needed(self):
+        original_arg_required = mock.Mock()
+        original_arg_required.required = False
+        arg_table = {'original': original_arg_required}
+        utils.make_hidden_alias(arg_table, 'original', 'new-name')
+        self.assertIn('new-name', arg_table)
+        # Note: the _DOCUMENT_AS_REQUIRED is tested as a functional
+        # test because it only affects how the doc synopsis is
+        # rendered.
+        self.assertFalse(arg_table['original'].required)
+        self.assertFalse(arg_table['new-name'].required)
+
+    def test_hidden_alias_marks_as_not_required(self):
+        original_arg_required = mock.Mock()
+        original_arg_required.required = True
+        arg_table = {'original': original_arg_required}
+        utils.make_hidden_alias(arg_table, 'original', 'new-name')
+        self.assertIn('new-name', arg_table)
+        self.assertFalse(arg_table['original'].required)
+        self.assertFalse(arg_table['new-name'].required)
+
+
 class TestValidateMututuallyExclusiveGroups(unittest.TestCase):
     def test_two_single_groups(self):
         # The most basic example of mutually exclusive args.
@@ -52,7 +99,6 @@ class TestValidateMututuallyExclusiveGroups(unittest.TestCase):
         parsed = FakeParsedArgs(foo='one', bar='two')
         with self.assertRaises(ValueError):
             utils.validate_mutually_exclusive(parsed, ['foo'], ['bar'])
-
 
     def test_multiple_groups(self):
         groups = (['one', 'two', 'three'], ['foo', 'bar', 'baz'],
@@ -97,3 +143,48 @@ class TestS3BucketExists(unittest.TestCase):
         self.s3_client.head_bucket.side_effect = forbidden_error
         self.assertTrue(
             utils.s3_bucket_exists(self.s3_client, self.bucket_name))
+
+
+class TestClientCreationFromGlobals(unittest.TestCase):
+    def setUp(self):
+        self.fake_client = {}
+        self.session = mock.Mock()
+        self.session.create_client.return_value = self.fake_client
+        self.parsed_globals = argparse.Namespace()
+        self.parsed_globals.region = 'us-west-2'
+        self.parsed_globals.endpoint_url = 'https://foo.bar.com'
+        self.parsed_globals.verify_ssl = False
+
+    def test_creates_clients_with_no_overrides(self):
+        client = utils.create_client_from_parsed_globals(
+            self.session, 'ec2', self.parsed_globals)
+        self.assertEqual(self.fake_client, client)
+        self.session.create_client.assert_called_once_with(
+            'ec2',
+            region_name='us-west-2',
+            verify=False,
+            endpoint_url='https://foo.bar.com'
+        )
+
+    def test_creates_clients_with_overrides(self):
+        overrides = {
+            'region_name': 'custom',
+            'verify': True,
+            'other_thing': 'more custom'
+        }
+        client = utils.create_client_from_parsed_globals(
+            self.session, 'ec2', self.parsed_globals, overrides)
+        self.assertEqual(self.fake_client, client)
+        self.session.create_client.assert_called_once_with(
+            'ec2',
+            region_name='custom',
+            verify=True,
+            other_thing='more custom',
+            endpoint_url='https://foo.bar.com'
+        )
+
+    def test_creates_clients_with_no_parsed_globals(self):
+        client = utils.create_client_from_parsed_globals(
+            self.session, 'ec2', argparse.Namespace())
+        self.assertEqual(self.fake_client, client)
+        self.session.create_client.assert_called_once_with('ec2')

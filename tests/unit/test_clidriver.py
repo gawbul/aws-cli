@@ -30,8 +30,8 @@ from awscli.clidriver import ServiceCommand
 from awscli.clidriver import ServiceOperation
 from awscli.customizations.commands import BasicCommand
 from awscli import formatter
+from awscli.argparser import HELP_BLURB
 from botocore.hooks import HierarchicalEmitter
-from botocore.provider import Provider
 
 
 GET_DATA = {
@@ -80,6 +80,14 @@ GET_DATA = {
                 "type": "int",
                 "help": "",
             },
+            "read-timeout": {
+                "type": "int",
+                "help": ""
+            },
+            "connect-timeout": {
+                "type": "int",
+                "help": ""
+            }
         }
     },
 }
@@ -87,6 +95,7 @@ GET_DATA = {
 GET_VARIABLE = {
     'provider': 'aws',
     'output': 'json',
+    'api_versions': {}
 }
 
 
@@ -160,7 +169,6 @@ class FakeSession(object):
         if emitter is None:
             emitter = HierarchicalEmitter()
         self.emitter = emitter
-        self.provider = Provider(self, 'aws')
         self.profile = None
         self.stream_logger_args = None
         self.credentials = 'fakecredentials'
@@ -196,9 +204,9 @@ class FakeSession(object):
     def get_config_variable(self, name):
         return GET_VARIABLE[name]
 
-    def get_service_model(self, name):
-        return botocore.model.ServiceModel(MINI_SERVICE,
-                                           service_name='s3')
+    def get_service_model(self, name, api_version=None):
+        return botocore.model.ServiceModel(
+            MINI_SERVICE, service_name='s3')
 
     def user_agent(self):
         return 'user_agent'
@@ -208,6 +216,10 @@ class FakeSession(object):
 
     def get_credentials(self):
         return self.credentials
+
+    def set_config_variable(self, name, value):
+        if name == 'profile':
+            self.profile = value
 
 
 class FakeCommand(BasicCommand):
@@ -257,6 +269,15 @@ class TestCliDriver(unittest.TestCase):
         driver.main('s3 list-objects --bucket foo --profile foo'.split())
         expected = {'log_level': logging.ERROR, 'logger_name': 'awscli'}
         self.assertEqual(driver.session.stream_logger_args[1], expected)
+
+    def test_ctrl_c_is_handled(self):
+        driver = CLIDriver(session=self.session)
+        fake_client = mock.Mock()
+        fake_client.list_objects.side_effect = KeyboardInterrupt
+        fake_client.can_paginate.return_value = False
+        driver.session.create_client = mock.Mock(return_value=fake_client)
+        rc = driver.main('s3 list-objects --bucket foo'.split())
+        self.assertEqual(rc, 130)
 
 
 class TestCliDriverHooks(unittest.TestCase):
@@ -353,9 +374,10 @@ class TestSearchPath(unittest.TestCase):
         # we have to force a reimport of the module to test our changes.
         six.moves.reload_module(awscli)
         # Our two overrides should be the last two elements in the search path.
-        search_path = driver.session.get_component(
-            'data_loader').get_search_paths()[:-2]
-        self.assertEqual(search_path, ['c:\\foo', 'c:\\bar'])
+        search_paths = driver.session.get_component(
+            'data_loader').search_paths
+        self.assertIn('c:\\foo', search_paths)
+        self.assertIn('c:\\bar', search_paths)
 
 
 class TestAWSCommand(BaseAWSCommandParamsTest):
@@ -457,7 +479,13 @@ class TestAWSCommand(BaseAWSCommandParamsTest):
             self.assertEqual(rc, 0)
 
             # Make sure uri_param was called
-            uri_param_mock.assert_called()
+            uri_param_mock.assert_any_call(
+                event_name='load-cli-arg.ec2.describe-instances.unknown-arg',
+                operation_name='describe-instances',
+                param=mock.ANY,
+                service_name='ec2',
+                value='file:///foo',
+            )
             # Make sure it was called with our passed-in URI
             self.assertEqual('file:///foo',
                              uri_param_mock.call_args_list[-1][1]['value'])
@@ -475,7 +503,13 @@ class TestAWSCommand(BaseAWSCommandParamsTest):
 
             self.assertEqual(rc, 0)
 
-            uri_param_mock.assert_called()
+            uri_param_mock.assert_any_call(
+                event_name='load-cli-arg.custom.foo.bar',
+                operation_name='foo',
+                param=mock.ANY,
+                service_name='custom',
+                value='file:///foo',
+            )
 
     @unittest.skip
     def test_custom_arg_no_paramfile(self):
@@ -543,9 +577,11 @@ class TestAWSCommand(BaseAWSCommandParamsTest):
         rc = driver.main('ec2 describe-instances '
                          '--filters file://does/not/exist.json'.split())
         self.assertEqual(rc, 255)
+        error_msg = self.stderr.getvalue()
         self.assertIn("Error parsing parameter '--filters': "
-                      "file does not exist: does/not/exist.json",
-                      self.stderr.getvalue())
+                      "Unable to load paramfile file://does/not/exist.json",
+                      error_msg)
+        self.assertIn("No such file or directory", error_msg)
 
     def test_aws_configure_in_error_message_no_credentials(self):
         driver = create_clidriver()
@@ -590,16 +626,37 @@ class TestAWSCommand(BaseAWSCommandParamsTest):
         rc = self.driver.main('ec2 describe-instances'.split())
         self.assertEqual(rc, 255)
 
+    def test_help_blurb_in_error_message(self):
+        with self.assertRaises(SystemExit):
+            self.driver.main([])
+        self.assertIn(HELP_BLURB, self.stderr.getvalue())
+
+    def test_help_blurb_in_service_error_message(self):
+        with self.assertRaises(SystemExit):
+            self.driver.main(['ec2'])
+        self.assertIn(HELP_BLURB, self.stderr.getvalue())
+
+    def test_help_blurb_in_operation_error_message(self):
+        with self.assertRaises(SystemExit):
+            self.driver.main(['ec2', 'run-instances'])
+        self.assertIn(HELP_BLURB, self.stderr.getvalue())
+
+    def test_help_blurb_in_unknown_argument_error_message(self):
+        with self.assertRaises(SystemExit):
+            self.driver.main(['ec2', 'run-instances', '--help'])
+        self.assertIn(HELP_BLURB, self.stderr.getvalue())
+
 
 class TestHowClientIsCreated(BaseAWSCommandParamsTest):
     def setUp(self):
         super(TestHowClientIsCreated, self).setUp()
         self.endpoint_creator_patch = mock.patch(
-            'botocore.client.EndpointCreator')
+            'botocore.args.EndpointCreator')
         self.endpoint_creator = self.endpoint_creator_patch.start()
         self.create_endpoint = \
                 self.endpoint_creator.return_value.create_endpoint
         self.endpoint = self.create_endpoint.return_value
+        self.endpoint.host = 'https://example.com'
         # Have the endpoint give a dummy empty response.
         http_response = models.Response()
         http_response.status_code = 200
@@ -614,17 +671,15 @@ class TestHowClientIsCreated(BaseAWSCommandParamsTest):
         self.assert_params_for_cmd(
             'ec2 describe-instances --endpoint-url https://foobar.com/',
             expected_rc=0)
-        self.create_endpoint.assert_called_with(
-            mock.ANY, 'us-east-1', verify=None, endpoint_url='https://foobar.com/',
-            is_secure=True, response_parser_factory=mock.ANY)
+        self.assertEqual(self.create_endpoint.call_args[1]['endpoint_url'],
+                         'https://foobar.com/')
 
     def test_aws_with_region(self):
         self.assert_params_for_cmd(
             'ec2 describe-instances --region us-west-2',
             expected_rc=0)
-        self.create_endpoint.assert_called_with(
-            mock.ANY, 'us-west-2', verify=None, endpoint_url=None,
-            is_secure=True, response_parser_factory=mock.ANY)
+        self.assertEqual(
+            self.create_endpoint.call_args[1]['region_name'], 'us-west-2')
 
     def test_aws_with_verify_false(self):
         self.assert_params_for_cmd(
@@ -632,19 +687,54 @@ class TestHowClientIsCreated(BaseAWSCommandParamsTest):
             expected_rc=0)
         # Because we used --no-verify-ssl, create_endpoint should be
         # called with verify=False
-        self.create_endpoint.assert_called_with(
-            mock.ANY, 'us-east-1', verify=False, endpoint_url=None,
-            is_secure=True, response_parser_factory=mock.ANY)
+        call_args = self.create_endpoint.call_args
+        self.assertFalse(call_args[1]['verify'])
 
     def test_aws_with_cacert_env_var(self):
         self.environ['AWS_CA_BUNDLE'] = '/path/cacert.pem'
         self.assert_params_for_cmd(
             'ec2 describe-instances --region us-east-1',
             expected_rc=0)
-        self.create_endpoint.assert_called_with(
-            mock.ANY, 'us-east-1', verify='/path/cacert.pem',
-            endpoint_url=None, is_secure=True,
-            response_parser_factory=mock.ANY)
+        call_args = self.create_endpoint.call_args
+        self.assertEqual(call_args[1]['verify'], '/path/cacert.pem')
+
+    def test_aws_with_read_timeout(self):
+        self.assert_params_for_cmd(
+            'lambda invoke --function-name foo out.log --cli-read-timeout 90',
+            expected_rc=0)
+        call_args = self.create_endpoint.call_args
+        self.assertEqual(call_args[1]['timeout'][1], 90)
+
+    def test_aws_with_blocking_read_timeout(self):
+        self.assert_params_for_cmd(
+            'lambda invoke --function-name foo out.log --cli-read-timeout 0',
+            expected_rc=0)
+        call_args = self.create_endpoint.call_args
+        self.assertEqual(call_args[1]['timeout'][1], None)
+
+    def test_aws_with_connnect_timeout(self):
+        self.assert_params_for_cmd(
+            'lambda invoke --function-name foo out.log '
+            '--cli-connect-timeout 90',
+            expected_rc=0)
+        call_args = self.create_endpoint.call_args
+        self.assertEqual(call_args[1]['timeout'][0], 90)
+
+    def test_aws_with_blocking_connect_timeout(self):
+        self.assert_params_for_cmd(
+            'lambda invoke --function-name foo out.log '
+            '--cli-connect-timeout 0',
+            expected_rc=0)
+        call_args = self.create_endpoint.call_args
+        self.assertEqual(call_args[1]['timeout'][0], None)
+
+    def test_aws_with_read_and_connnect_timeout(self):
+        self.assert_params_for_cmd(
+            'lambda invoke --function-name foo out.log '
+            '--cli-read-timeout 70 --cli-connect-timeout 90',
+            expected_rc=0)
+        call_args = self.create_endpoint.call_args
+        self.assertEqual(call_args[1]['timeout'], (90, 70))
 
 
 class TestHTTPParamFileDoesNotExist(BaseAWSCommandParamsTest):

@@ -13,79 +13,27 @@
 
 import logging
 import re
-
-
 import botocore.exceptions
 from botocore import xform_name
 
-from awscli.customizations.commands import BasicCommand
 from awscli.customizations.emr import configutils
 from awscli.customizations.emr import emrutils
 from awscli.customizations.emr import exceptions
 from awscli.customizations.emr.command import Command
 from awscli.customizations.emr.constants import EC2
 from awscli.customizations.emr.constants import EC2_ROLE_NAME
+from awscli.customizations.emr.constants import ROLE_ARN_PATTERN
 from awscli.customizations.emr.constants import EMR
 from awscli.customizations.emr.constants import EMR_ROLE_NAME
+from awscli.customizations.emr.constants import EMR_AUTOSCALING_ROLE_NAME
+from awscli.customizations.emr.constants import APPLICATION_AUTOSCALING
+from awscli.customizations.emr.constants import EC2_ROLE_POLICY_NAME
+from awscli.customizations.emr.constants import EMR_ROLE_POLICY_NAME
+from awscli.customizations.emr.constants import EMR_AUTOSCALING_ROLE_POLICY_NAME
 from awscli.customizations.emr.exceptions import ResolveServicePrincipalError
 
 
 LOG = logging.getLogger(__name__)
-
-
-EC2_ROLE_POLICY = {
-    "Statement": [
-        {
-            "Action": [
-                "cloudwatch:*",
-                "dynamodb:*",
-                "ec2:Describe*",
-                "elasticmapreduce:Describe*",
-                "rds:Describe*",
-                "s3:*",
-                "sdb:*",
-                "sns:*",
-                "sqs:*"
-            ],
-            "Effect": "Allow",
-            "Resource": ["*"]
-        }
-    ]
-}
-
-
-EMR_ROLE_POLICY = {
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Action": [
-                "ec2:AuthorizeSecurityGroupIngress",
-                "ec2:CancelSpotInstanceRequests",
-                "ec2:CreateSecurityGroup",
-                "ec2:CreateTags",
-                "ec2:Describe*",
-                "ec2:DeleteTags",
-                "ec2:ModifyImageAttribute",
-                "ec2:ModifyInstanceAttribute",
-                "ec2:RequestSpotInstances",
-                "ec2:RunInstances",
-                "ec2:TerminateInstances",
-                "iam:PassRole",
-                "iam:ListRolePolicies",
-                "iam:GetRole",
-                "iam:GetRolePolicy",
-                "iam:ListInstanceProfiles",
-                "s3:Get*",
-                "s3:List*",
-                "s3:CreateBucket",
-                "sdb:BatchPutAttributes",
-                "sdb:Select"
-            ],
-            "Effect": "Allow",
-            "Resource": "*"
-        }
-    ]
-}
 
 
 def assume_role_policy(serviceprincipal):
@@ -100,6 +48,22 @@ def assume_role_policy(serviceprincipal):
             }
         ]
     }
+
+
+def get_role_policy_arn(region, policy_name):
+    region_suffix = _get_policy_arn_suffix(region)
+    role_arn = ROLE_ARN_PATTERN.replace("{{region_suffix}}", region_suffix)
+    role_arn = role_arn.replace("{{policy_name}}", policy_name)
+    return role_arn
+
+def _get_policy_arn_suffix(region):
+    region_string = region.lower()
+    if region_string.startswith("cn-"):
+        return "aws-cn"
+    elif region_string.startswith("us-gov"):
+        return "aws-us-gov"
+    else:
+        return "aws"
 
 
 def get_service_principal(service, endpoint_host):
@@ -138,8 +102,10 @@ class CreateDefaultRoles(Command):
     NAME = "create-default-roles"
     DESCRIPTION = ('Creates the default IAM role ' +
                    EC2_ROLE_NAME + ' and ' +
-                   EMR_ROLE_NAME + ' which can be used when'
-                   ' creating the cluster using the create-cluster command.\n'
+                   EMR_ROLE_NAME + ' which can be used when creating the'
+                   ' cluster using the create-cluster command. The default'
+                   ' roles for EMR use managed policies, which are updated'
+                   ' automatically to support future EMR functionality.\n'
                    '\nIf you do not have a Service Role and Instance Profile '
                    'variable set for your create-cluster command in the AWS '
                    'CLI config file, create-default-roles will automatically '
@@ -158,11 +124,9 @@ class CreateDefaultRoles(Command):
                       ' custom endpoint should be called for IAM operations'
                       '.</p>'}
     ]
-    EXAMPLES = BasicCommand.FROM_FILE('emr', 'create-default-roles.rst')
 
     def _run_main_command(self, parsed_args, parsed_globals):
-        ec2_result = None
-        emr_result = None
+
         self.iam_endpoint_url = parsed_args.iam_endpoint
 
         self._check_for_iam_endpoint(self.region, self.iam_endpoint_url)
@@ -176,22 +140,14 @@ class CreateDefaultRoles(Command):
         LOG.debug('elasticmapreduce endpoint used for resolving'
                   ' service principal: ' + self.emr_endpoint_url)
 
-        # Check if the default EC2 Role for EMR exists.
-        role_name = EC2_ROLE_NAME
-        if self._check_if_role_exists(role_name, parsed_globals):
-            LOG.debug('Role ' + role_name + ' exists.')
-        else:
-            LOG.debug('Role ' + role_name + ' does not exist.'
-                      ' Creating default role for EC2: ' + role_name)
-            ec2_result = self._create_role_with_role_policy(
-                role_name, role_name, EC2,
-                emrutils.dict_to_string(EC2_ROLE_POLICY),
-                parsed_globals)
+        # Create default EC2 Role for EMR if it does not exist.
+        ec2_result, ec2_policy = self._create_role_if_not_exists(parsed_globals, EC2_ROLE_NAME,
+                                                                 EC2_ROLE_POLICY_NAME, [EC2])
 
-        # Check if the default EC2 Instance Profile for EMR exists.
+        # Create default EC2 Instance Profile for EMR if it does not exist.
         instance_profile_name = EC2_ROLE_NAME
-        if self._check_if_instance_profile_exists(instance_profile_name,
-                                                  parsed_globals):
+        if self.check_if_instance_profile_exists(instance_profile_name,
+                                                 parsed_globals):
             LOG.debug('Instance Profile ' + instance_profile_name + ' exists.')
         else:
             LOG.debug('Instance Profile ' + instance_profile_name +
@@ -201,27 +157,40 @@ class CreateDefaultRoles(Command):
                                                     instance_profile_name,
                                                     parsed_globals)
 
-        # Check if the default EMR Role exists.
-        role_name = EMR_ROLE_NAME
-        if self._check_if_role_exists(role_name, parsed_globals):
-            LOG.debug('Role ' + role_name + ' exists.')
-        else:
-            LOG.debug('Role ' + role_name + ' does not exist.'
-                      ' Creating default role for EMR: ' + role_name)
-            emr_result = self._create_role_with_role_policy(
-                role_name, role_name, EMR,
-                emrutils.dict_to_string(EMR_ROLE_POLICY),
-                parsed_globals)
+        # Create default EMR Role if it does not exist.
+        emr_result, emr_policy = self._create_role_if_not_exists(parsed_globals, EMR_ROLE_NAME,
+                                                                 EMR_ROLE_POLICY_NAME, [EMR])
+
+        # Create default EMR AutoScaling Role if it does not exist.
+        emr_autoscaling_result, emr_autoscaling_policy = \
+            self._create_role_if_not_exists(parsed_globals, EMR_AUTOSCALING_ROLE_NAME,
+                                            EMR_AUTOSCALING_ROLE_POLICY_NAME, [EMR, APPLICATION_AUTOSCALING])
 
         configutils.update_roles(self._session)
-
         emrutils.display_response(
             self._session,
             'create_role',
-            self._construct_result(ec2_result, emr_result),
+            self._construct_result(ec2_result, ec2_policy,
+                                   emr_result, emr_policy,
+                                   emr_autoscaling_result, emr_autoscaling_policy),
             parsed_globals)
 
         return 0
+
+    def _create_role_if_not_exists(self, parsed_globals, role_name, policy_name, service_names):
+        result = None
+        policy = None
+
+        if self.check_if_role_exists(role_name, parsed_globals):
+            LOG.debug('Role ' + role_name + ' exists.')
+        else:
+            LOG.debug('Role ' + role_name + ' does not exist.'
+                      ' Creating default role: ' + role_name)
+            role_arn = get_role_policy_arn(self.region, policy_name)
+            result = self._create_role_with_role_policy(
+                    role_name, service_names, role_arn, parsed_globals)
+            policy = self._get_role_policy(role_arn, parsed_globals)
+        return result, policy
 
     def _check_for_iam_endpoint(self, region, iam_endpoint):
         try:
@@ -230,29 +199,33 @@ class CreateDefaultRoles(Command):
             if iam_endpoint is None:
                 raise exceptions.UnknownIamEndpointError(region=region)
 
-    def _construct_result(self, ec2_response, emr_response):
+    def _construct_result(self, ec2_response, ec2_policy,
+                          emr_response, emr_policy,
+                          emr_autoscaling_response, emr_autoscaling_policy):
         result = []
         self._construct_role_and_role_policy_structure(
-            result, ec2_response, EC2_ROLE_POLICY)
+            result, ec2_response, ec2_policy)
         self._construct_role_and_role_policy_structure(
-            result, emr_response, EMR_ROLE_POLICY)
+            result, emr_response, emr_policy)
+        self._construct_role_and_role_policy_structure(
+            result, emr_autoscaling_response, emr_autoscaling_policy)
         return result
 
     def _construct_role_and_role_policy_structure(
-            self, list, response, role_policy):
-        if response is not None and response[1] is not None:
-            list.append({'Role': response[1]['Role'],
-                         'RolePolicy': role_policy})
+            self, list, response, policy):
+        if response is not None and response['Role'] is not None:
+            list.append({'Role': response['Role'], 'RolePolicy': policy})
             return list
 
-    def _check_if_role_exists(self, role_name, parsed_globals):
+    def check_if_role_exists(self, role_name, parsed_globals):
         parameters = {'RoleName': role_name}
+
         try:
             self._call_iam_operation('GetRole', parameters, parsed_globals)
-        except Exception as e:
-            role_not_found_msg = 'The role with name ' + role_name +\
-                                 ' cannot be found'
-            if role_not_found_msg in e.message:
+        except botocore.exceptions.ClientError as e:
+            role_not_found_code = "NoSuchEntity"
+            error_code = e.response.get('Error', {}).get('Code', '')
+            if role_not_found_code == error_code:
                 # No role error.
                 return False
             else:
@@ -261,17 +234,16 @@ class CreateDefaultRoles(Command):
 
         return True
 
-    def _check_if_instance_profile_exists(self, instance_profile_name,
-                                          parsed_globals):
+    def check_if_instance_profile_exists(self, instance_profile_name,
+                                         parsed_globals):
         parameters = {'InstanceProfileName': instance_profile_name}
         try:
             self._call_iam_operation('GetInstanceProfile', parameters,
                                      parsed_globals)
-        except Exception as e:
-            profile_not_found_msg = 'Instance Profile ' +\
-                                    instance_profile_name +\
-                                    ' cannot be found.'
-            if profile_not_found_msg in e.message:
+        except botocore.exceptions.ClientError as e:
+            profile_not_found_code = 'NoSuchEntity'
+            error_code = e.response.get('Error', {}).get('Code')
+            if profile_not_found_code == error_code:
                 # No instance profile error.
                 return False
             else:
@@ -280,11 +252,27 @@ class CreateDefaultRoles(Command):
 
         return True
 
+    def _get_role_policy(self, arn, parsed_globals):
+        parameters = {}
+        parameters['PolicyArn'] = arn
+        policy_details = self._call_iam_operation('GetPolicy', parameters,
+                                                  parsed_globals)
+        parameters["VersionId"] = policy_details["Policy"]["DefaultVersionId"]
+        policy_version_details = self._call_iam_operation('GetPolicyVersion',
+                                                          parameters,
+                                                          parsed_globals)
+        return policy_version_details["PolicyVersion"]["Document"]
+
     def _create_role_with_role_policy(
-            self, role_name, policy_name, service_name, policy_document,
-            parsed_globals):
-        service_principal = get_service_principal(service_name,
-                                                  self.emr_endpoint_url)
+            self, role_name, service_names, role_arn, parsed_globals):
+
+        if len(service_names) == 1:
+            service_principal = get_service_principal(service_names[0], self.emr_endpoint_url)
+        else:
+            service_principal = []
+            for service in service_names:
+                service_principal.append(get_service_principal(service, self.emr_endpoint_url))
+
         LOG.debug(service_principal)
 
         parameters = {'RoleName': role_name}
@@ -296,10 +284,10 @@ class CreateDefaultRoles(Command):
                                                         parsed_globals)
 
         parameters = {}
-        parameters['PolicyDocument'] = policy_document
-        parameters['PolicyName'] = policy_name
+        parameters['PolicyArn'] = role_arn
         parameters['RoleName'] = role_name
-        self._call_iam_operation('PutRolePolicy', parameters, parsed_globals)
+        self._call_iam_operation('AttachRolePolicy',
+                                 parameters, parsed_globals)
 
         return create_role_response
 
@@ -318,6 +306,6 @@ class CreateDefaultRoles(Command):
 
     def _call_iam_operation(self, operation_name, parameters, parsed_globals):
         client = self._session.create_client(
-            'iam', self.region, self.iam_endpoint_url,
-            parsed_globals.verify_ssl)
+            'iam', region_name=self.region, endpoint_url=self.iam_endpoint_url,
+            verify=parsed_globals.verify_ssl)
         return getattr(client, xform_name(operation_name))(**parameters)

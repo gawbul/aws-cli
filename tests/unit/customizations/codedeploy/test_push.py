@@ -1,4 +1,4 @@
-# Copyright 2015 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2014 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You
 # may not use this file except in compliance with the License. A copy of
@@ -16,10 +16,11 @@ import awscli
 from argparse import Namespace
 from mock import MagicMock, patch, ANY, call
 from six import StringIO
+from botocore.exceptions import ClientError
 
 from awscli.customizations.codedeploy.push import Push
-from awscli.errorhandler import ClientError
 from awscli.testutils import unittest
+from awscli.compat import ZIP_COMPRESSION_MODE
 
 
 class TestPush(unittest.TestCase):
@@ -154,6 +155,16 @@ class TestPush(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.push._push(self.args)
 
+    def test_push_strips_quotes_from_etag(self):
+        self.args.bucket = self.bucket
+        self.args.key = self.key
+        self.push._compress = MagicMock(return_value=self.bundle_mock)
+        self.push._upload_to_s3 = MagicMock(return_value=self.upload_response)
+        self.push._register_revision = MagicMock()
+        self.push._push(self.args)
+        self.push._register_revision.assert_called_with(self.args)
+        self.assertEquals(str(self.args.eTag), self.upload_response['ETag'].replace('"',""))
+
     @patch('sys.stdout', new_callable=StringIO)
     def test_push_output_message(self, stdout_mock):
         self.args.bucket = self.bucket
@@ -168,7 +179,7 @@ class TestPush(unittest.TestCase):
             'bundleType=zip,eTag={2},version={3}'.format(
                 self.bucket,
                 self.key,
-                self.eTag,
+                self.eTag.replace('"',""),
                 self.version_id)
         )
         expected_output = (
@@ -216,9 +227,11 @@ class TestPush(unittest.TestCase):
         with self.push._compress(
                 self.args.source,
                 self.args.ignore_hidden_files):
+            zf.assert_called_with(ANY, 'w', allowZip64=True)
             zf().write.assert_called_with(
                 '/tmp/appspec.yml',
-                self.appspec
+                self.appspec,
+                ZIP_COMPRESSION_MODE
             )
 
     def test_upload_to_s3_with_put_object(self):
@@ -269,11 +282,8 @@ class TestPush(unittest.TestCase):
         self.bundle_mock.tell.return_value = (6 << 20)
         self.bundle_mock.read.return_value = b'a' * (6 << 20)
         self.push.s3.upload_part.side_effect = ClientError(
-            error_code='Error',
-            error_message='Error',
-            error_type='error',
-            operation_name='UploadPart',
-            http_status_code=400
+            {'Error': {'Code': 'Error', 'Message': 'Error'}},
+            'UploadPart'
         )
         with self.assertRaises(ClientError):
             self.push._upload_to_s3(self.args, self.bundle_mock)

@@ -11,8 +11,6 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 
-from awscli.customizations.emr import constants
-
 
 class EmrError(Exception):
 
@@ -147,9 +145,9 @@ class LogUriError(EmrError):
 class MasterDNSNotAvailableError(EmrError):
 
     """
-    Cannot get public dns of master node on the cluster.
+    Cannot get dns of master node on the cluster.
     """
-    fmt = 'Cannot get Public DNS of master node on the cluster. '\
+    fmt = 'Cannot get DNS of master node on the cluster. '\
           ' Please try again after some time.'
 
 
@@ -161,16 +159,6 @@ class WrongPuttyKeyError(EmrError):
     fmt = 'Key file file format is incorrect. Putty expects a ppk file. '\
           'Please refer to documentation at http://docs.aws.amazon.com/'\
           'ElasticMapReduce/latest/DeveloperGuide/EMR_SetUp_SSH.html. '
-
-
-class WrongSSHKeyError(EmrError):
-
-    """
-    A wrong key has been used with a compatible program.
-    """
-    fmt = 'Key file file format is incorrect. SSH expects a cer or pem file. '\
-          'Please refer to documentation at http://docs.aws.amazon.com/'\
-          'ElasticMapReduce/latest/DeveloperGuide/EMR_SetUp_SSH.html '
 
 
 class SSHNotFoundError(EmrError):
@@ -200,6 +188,15 @@ class SubnetAndAzValidationError(EmrError):
     """
     fmt = ('aws: error: You may not specify both a SubnetId and an Availabili'
            'tyZone (placement) because ec2SubnetId implies a placement.')
+
+
+class RequiredOptionsError(EmrError):
+
+    """
+    Either of option1 or option2 is required.
+    """
+
+    fmt = ('aws: error: Either {option1} or {option2} is required.')
 
 
 class MutualExclusiveOptionError(EmrError):
@@ -284,6 +281,12 @@ class InvalidEmrFsArgumentsError(EmrError):
            ' following parameters are invalid: {invalid}')
 
 
+class DuplicateEmrFsConfigurationError(EmrError):
+
+    fmt = ('aws: error: EMRFS should be configured either using '
+           '--configuration or --emrfs but not both')
+
+
 class UnknownCseProviderTypeError(EmrError):
 
     """
@@ -325,3 +328,14 @@ class InvalidBooleanConfigError(EmrError):
            "invalid. The value should be either 'True' or 'False'. Use "
            "'aws configure set {profile_var_name}.emr.{config_key} <value>' "
            "command to set a valid value.")
+
+
+class UnsupportedCommandWithReleaseError(EmrError):
+
+    fmt = ("aws: error: {command} is not supported with "
+           "'{release_label}' release.")
+
+class MissingAutoScalingRoleError(EmrError):
+
+    fmt = ("aws: error: Must specify --auto-scaling-role when configuring an "
+           "AutoScaling policy for an instance group.")

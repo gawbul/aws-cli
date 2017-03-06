@@ -13,24 +13,24 @@
 import os
 import platform
 from awscli.testutils import unittest, FileCreator, BaseAWSCommandParamsTest
+from awscli.testutils import skip_if_windows
 import stat
 import tempfile
 import shutil
 import socket
 
+from botocore.exceptions import ClientError
 from awscli.compat import six
 import mock
 
-from awscli.errorhandler import ClientError
 from awscli.customizations.s3.filegenerator import FileGenerator, \
     FileDecodingError, FileStat, is_special_file, is_readable
-from awscli.customizations.s3.utils import get_file_stat
+from awscli.customizations.s3.utils import get_file_stat, EPOCH_TIME
 from tests.unit.customizations.s3 import make_loc_files, clean_loc_files, \
     compare_files
 
 
-@unittest.skipIf(platform.system() not in ['Darwin', 'Linux'],
-                 'Special files only supported on mac/linux')
+@skip_if_windows('Special files only supported on mac/linux')
 class TestIsSpecialFile(unittest.TestCase):
     def setUp(self):
         self.files = FileCreator()
@@ -158,8 +158,7 @@ class LocalFileGeneratorTest(unittest.TestCase):
             compare_files(self, result_list[i], ref_list[i])
 
 
-@unittest.skipIf(platform.system() not in ['Darwin', 'Linux'],
-                 'Symlink tests only supported on mac/linux')
+@skip_if_windows('Symlink tests only supported on mac/linux')
 class TestIgnoreFilesLocally(unittest.TestCase):
     """
     This class tests the ability to ignore particular files.  This includes
@@ -251,8 +250,7 @@ class TestThrowsWarning(unittest.TestCase):
                          ("warning: Skipping file %s. File/Directory is "
                           "not readable." % full_path))
 
-    @unittest.skipIf(platform.system() not in ['Darwin', 'Linux'],
-                     'Special files only supported on mac/linux')
+    @skip_if_windows('Special files only supported on mac/linux')
     def test_is_special_file_warning(self):
         file_gen = FileGenerator(self.client, '', False)
         file_path = os.path.join(self.files.rootdir, 'foo')
@@ -268,8 +266,7 @@ class TestThrowsWarning(unittest.TestCase):
                           "socket." % file_path))
 
 
-@unittest.skipIf(platform.system() not in ['Darwin', 'Linux'],
-                 'Symlink tests only supported on mac/linux')
+@skip_if_windows('Symlink tests only supported on mac/linux')
 class TestSymlinksIgnoreFiles(unittest.TestCase):
     """
     This class tests the ability to list out the correct local files
@@ -419,6 +416,14 @@ class TestListFilesLocally(unittest.TestCase):
                                key=lambda items: items.replace(os.sep, '/')))
         self.assertEqual(values, ref_vals)
 
+    @mock.patch('awscli.customizations.s3.filegenerator.get_file_stat')
+    def test_list_files_with_invalid_timestamp(self, stat_mock):
+        stat_mock.return_value = 9, None
+        open(os.path.join(self.directory, 'test'), 'w').close()
+        file_generator = FileGenerator(None, None, None)
+        value = list(file_generator.list_files(self.directory, dir_op=True))[0]
+        self.assertIs(value[1]['LastModified'], EPOCH_TIME)
+
     def test_list_local_files_with_unicode_chars(self):
         p = os.path.join
         open(p(self.directory, u'a'), 'w').close()
@@ -519,7 +524,10 @@ class S3FileGeneratorTest(BaseAWSCommandParamsTest):
         params = {'region': 'us-east-1'}
         self.client = mock.Mock()
         self.client.head_object.side_effect = \
-            ClientError(404, 'Not Found', '404', 'HeadObject', 404)
+                ClientError(
+                    {'Error': {'Code': '404', 'Message': 'Not Found'}},
+                    'HeadObject',
+                )
         file_gen = FileGenerator(self.client, '')
         files = file_gen.call(input_s3_file)
         # The error should include 404 and should include the key name.

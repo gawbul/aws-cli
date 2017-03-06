@@ -11,7 +11,6 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 
-from awscli.customizations.commands import BasicCommand
 from awscli.customizations.emr import argumentschema
 from awscli.customizations.emr import emrutils
 from awscli.customizations.emr import helptext
@@ -33,12 +32,17 @@ class AddSteps(Command):
          'help_text': helptext.STEPS
          }
     ]
-    EXAMPLES = BasicCommand.FROM_FILE('emr', 'add-steps.rst')
 
     def _run_main_command(self, parsed_args, parsed_globals):
         parsed_steps = parsed_args.steps
+
+        release_label = emrutils.get_release_label(
+            parsed_args.cluster_id, self._session, self.region,
+            parsed_globals.endpoint_url, parsed_globals.verify_ssl)
+
         step_list = steputils.build_step_config_list(
-            parsed_step_list=parsed_steps, region=self.region)
+            parsed_step_list=parsed_steps, region=self.region,
+            release_label=release_label)
         parameters = {
             'JobFlowId': parsed_args.cluster_id,
             'Steps': step_list

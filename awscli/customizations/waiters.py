@@ -159,6 +159,8 @@ class WaiterStateDocBuilder(object):
             # Include what operation is being used.
             description += self._build_operation_description(
                 self._waiter_config.operation)
+        description += self._build_polling_description(
+            self._waiter_config.delay, self._waiter_config.max_attempts)
         return description
 
     def _build_success_description(self, acceptor):
@@ -181,6 +183,14 @@ class WaiterStateDocBuilder(object):
         operation_name = xform_name(operation).replace('_', '-')
         return u'when polling with ``%s``.' % operation_name
 
+    def _build_polling_description(self, delay, max_attempts):
+        description = (
+            ' It will poll every %s seconds until a successful state '
+            'has been reached. This will exit with a return code of 255 '
+            'after %s failed checks.'
+            % (delay, max_attempts))
+        return description
+
 
 class WaiterCaller(object):
     def __init__(self, session, waiter_name):
@@ -188,8 +198,6 @@ class WaiterCaller(object):
         self._waiter_name = waiter_name
 
     def invoke(self, service_name, operation_name, parameters, parsed_globals):
-        self._session.unregister(
-            'after-call', unique_id='awscli-error-handler')
         client = self._session.create_client(
             service_name, region_name=parsed_globals.region,
             endpoint_url=parsed_globals.endpoint_url,

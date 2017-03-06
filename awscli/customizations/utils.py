@@ -14,6 +14,7 @@
 Utility functions to make it easier to work with customizations.
 
 """
+import copy
 
 from botocore.exceptions import ClientError
 
@@ -25,11 +26,51 @@ def rename_argument(argument_table, existing_name, new_name):
     del argument_table[existing_name]
 
 
+def _copy_argument(argument_table, current_name, copy_name):
+    current = argument_table[current_name]
+    copy_arg = copy.copy(current)
+    copy_arg.name = copy_name
+    argument_table[copy_name] = copy_arg
+    return copy_arg
+
+
+def make_hidden_alias(argument_table, existing_name, alias_name):
+    """Create a hidden alias for an existing argument.
+
+    This will copy an existing argument object in an arg table,
+    and add a new entry to the arg table with a different name.
+    The new argument will also be undocumented.
+
+    This is needed if you want to check an existing argument,
+    but you still need the other one to work for backwards
+    compatibility reasons.
+
+    """
+    current = argument_table[existing_name]
+    copy_arg = _copy_argument(argument_table, existing_name, alias_name)
+    copy_arg._UNDOCUMENTED = True
+    if current.required:
+        # If the current argument is required, then
+        # we'll mark both as not required, but
+        # flag _DOCUMENT_AS_REQUIRED so our doc gen
+        # knows to still document this argument as required.
+        copy_arg.required = False
+        current.required = False
+        current._DOCUMENT_AS_REQUIRED = True
+
+
 def rename_command(command_table, existing_name, new_name):
     current = command_table[existing_name]
     command_table[new_name] = current
     current.name = new_name
     del command_table[existing_name]
+
+
+def alias_command(command_table, existing_name, new_name):
+    """Moves an argument to a new name, keeping the old as a hidden alias."""
+    current = command_table[existing_name]
+    _copy_argument(command_table, existing_name, new_name)
+    current._UNDOCUMENTED = True
 
 
 def validate_mutually_exclusive_handler(*groups):
@@ -78,3 +119,23 @@ def s3_bucket_exists(s3_client, bucket_name):
         if error_code == 404:
             bucket_exists = False
     return bucket_exists
+
+
+def create_client_from_parsed_globals(session, service_name, parsed_globals,
+                                      overrides=None):
+    """Creates a service client, taking parsed_globals into account
+
+    Any values specified in overrides will override the returned dict. Note
+    that this override occurs after 'region' from parsed_globals has been
+    translated into 'region_name' in the resulting dict.
+    """
+    client_args = {}
+    if 'region' in parsed_globals:
+        client_args['region_name'] = parsed_globals.region
+    if 'endpoint_url' in parsed_globals:
+        client_args['endpoint_url'] = parsed_globals.endpoint_url
+    if 'verify_ssl' in parsed_globals:
+        client_args['verify'] = parsed_globals.verify_ssl
+    if overrides:
+        client_args.update(overrides)
+    return session.create_client(service_name, **client_args)

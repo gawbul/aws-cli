@@ -16,6 +16,48 @@ from awscli.compat import six
 from difflib import get_close_matches
 
 
+HELP_BLURB = (
+    "To see help text, you can run:\n"
+    "\n"
+    "  aws help\n"
+    "  aws <command> help\n"
+    "  aws <command> <subcommand> help\n"
+)
+USAGE = (
+    "aws [options] <command> <subcommand> [<subcommand> ...] [parameters]\n"
+    "%s" % HELP_BLURB
+)
+
+
+class CommandAction(argparse.Action):
+    """Custom action for CLI command arguments
+
+    Allows the choices for the argument to be mutable. The choices
+    are dynamically retrieved from the keys of the referenced command
+    table
+    """
+    def __init__(self, option_strings, dest, command_table, **kwargs):
+        self.command_table = command_table
+        super(CommandAction, self).__init__(
+            option_strings, dest, choices=self.choices, **kwargs
+        )
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+
+    @property
+    def choices(self):
+        return list(self.command_table.keys())
+
+    @choices.setter
+    def choices(self, val):
+        # argparse.Action will always try to set this value upon
+        # instantiation, but this value should be dynamically
+        # generated from the command table keys. So make this a
+        # NOOP if argparse.Action tries to set this value.
+        pass
+
+
 class CLIArgParser(argparse.ArgumentParser):
     Formatter = argparse.RawTextHelpFormatter
 
@@ -71,13 +113,13 @@ class MainArgParser(CLIArgParser):
     Formatter = argparse.RawTextHelpFormatter
 
     def __init__(self, command_table, version_string,
-                 description, usage, argument_table):
+                 description, argument_table):
         super(MainArgParser, self).__init__(
             formatter_class=self.Formatter,
             add_help=False,
             conflict_handler='resolve',
             description=description,
-            usage=usage)
+            usage=USAGE)
         self._build(command_table, version_string, argument_table)
 
     def _create_choice_help(self, choices):
@@ -93,29 +135,28 @@ class MainArgParser(CLIArgParser):
         self.add_argument('--version', action="version",
                           version=version_string,
                           help='Display the version of this tool')
-        self.add_argument('command', choices=list(command_table.keys()))
+        self.add_argument('command', action=CommandAction,
+                          command_table=command_table)
 
 
 class ServiceArgParser(CLIArgParser):
-
-    Usage = ("aws [options] <command> <subcommand> [parameters]")
 
     def __init__(self, operations_table, service_name):
         super(ServiceArgParser, self).__init__(
             formatter_class=argparse.RawTextHelpFormatter,
             add_help=False,
             conflict_handler='resolve',
-            usage=self.Usage)
+            usage=USAGE)
         self._build(operations_table)
         self._service_name = service_name
 
     def _build(self, operations_table):
-        self.add_argument('operation', choices=list(operations_table.keys()))
+        self.add_argument('operation', action=CommandAction,
+                          command_table=operations_table)
 
 
 class ArgTableArgParser(CLIArgParser):
     """CLI arg parser based on an argument table."""
-    Usage = ("aws [options] <command> <subcommand> [parameters]")
 
     def __init__(self, argument_table, command_table=None):
         # command_table is an optional subcommand_table.  If it's passed
@@ -124,7 +165,7 @@ class ArgTableArgParser(CLIArgParser):
         super(ArgTableArgParser, self).__init__(
             formatter_class=self.Formatter,
             add_help=False,
-            usage=self.Usage,
+            usage=USAGE,
             conflict_handler='resolve')
         if command_table is None:
             command_table = {}
@@ -135,8 +176,8 @@ class ArgTableArgParser(CLIArgParser):
             argument = argument_table[arg_name]
             argument.add_to_parser(self)
         if command_table:
-            self.add_argument('subcommand', choices=list(command_table.keys()),
-                              nargs='?')
+            self.add_argument('subcommand', action=CommandAction,
+                              command_table=command_table, nargs='?')
 
     def parse_known_args(self, args, namespace=None):
         if len(args) == 1 and args[0] == 'help':

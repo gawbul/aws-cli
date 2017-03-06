@@ -12,8 +12,12 @@
 # language governing permissions and limitations under the License.
 from awscli.testutils import unittest
 
-from botocore.exceptions import DataNotFoundError
+from botocore.exceptions import DataNotFoundError, PaginationError
+from botocore.model import OperationModel
+from awscli.help import OperationHelpCommand, OperationDocumentEventHandler
+
 import mock
+from mock import Mock, patch
 
 from awscli.customizations import paginate
 
@@ -97,6 +101,56 @@ class TestArgumentTableModifications(TestPaginateBase):
         self.assertEqual(starting_table, argument_table)
 
 
+class TestHelpDocumentationModifications(TestPaginateBase):
+    def test_injects_pagination_help_text(self):
+        with patch('awscli.customizations.paginate.get_paginator_config',
+                   return_value={'result_key': 'abc'}):
+            help_command = OperationHelpCommand(
+                Mock(), Mock(), Mock(), 'foo', OperationDocumentEventHandler)
+            help_command.obj = Mock(OperationModel)
+            help_command.obj.name = 'foo'
+            paginate.add_paging_description(help_command)
+            self.assertIn('``foo`` is a paginated operation. Multiple API',
+                          help_command.doc.getvalue().decode())
+            self.assertIn('following query expressions: ``abc``',
+                          help_command.doc.getvalue().decode())
+
+    def test_shows_result_keys_when_array(self):
+        with patch('awscli.customizations.paginate.get_paginator_config',
+                   return_value={'result_key': ['abc', '123']}):
+            help_command = OperationHelpCommand(
+                Mock(), Mock(), Mock(), 'foo', OperationDocumentEventHandler)
+            help_command.obj = Mock(OperationModel)
+            help_command.obj.name = 'foo'
+            paginate.add_paging_description(help_command)
+            self.assertIn('following query expressions: ``abc``, ``123``',
+                          help_command.doc.getvalue().decode())
+
+    def test_does_not_show_result_key_if_not_present(self):
+        with patch('awscli.customizations.paginate.get_paginator_config',
+                   return_value={'limit_key': 'aaa'}):
+            help_command = OperationHelpCommand(
+                Mock(), Mock(), Mock(), 'foo', OperationDocumentEventHandler)
+            help_command.obj = Mock(OperationModel)
+            help_command.obj.name = 'foo'
+            paginate.add_paging_description(help_command)
+            self.assertIn('``foo`` is a paginated operation. Multiple API',
+                          help_command.doc.getvalue().decode())
+            self.assertNotIn('following query expressions',
+                             help_command.doc.getvalue().decode())
+
+    def test_does_not_inject_when_no_pagination(self):
+        with patch('awscli.customizations.paginate.get_paginator_config',
+                   return_value=None):
+            help_command = OperationHelpCommand(
+                Mock(), Mock(), Mock(), 'foo', OperationDocumentEventHandler)
+            help_command.obj = Mock(OperationModel)
+            help_command.obj.name = 'foo'
+            paginate.add_paging_description(help_command)
+            self.assertNotIn('``foo`` is a paginated operation',
+                             help_command.doc.getvalue().decode())
+
+
 class TestStringLimitKey(TestPaginateBase):
 
     def setUp(self):
@@ -155,6 +209,9 @@ class TestShouldEnablePagination(TestPaginateBase):
         super(TestShouldEnablePagination, self).setUp()
         self.parsed_globals = mock.Mock()
         self.parsed_args = mock.Mock()
+        self.parsed_args.starting_token = None
+        self.parsed_args.page_size = None
+        self.parsed_args.max_items = None
 
     def test_should_not_enable_pagination(self):
         # Here the user has specified a manual pagination argument,
@@ -199,7 +256,22 @@ class TestShouldEnablePagination(TestPaginateBase):
         self.assertTrue(self.parsed_globals.paginate,
                         "Pagination was not enabled.")
 
-    def test_shadowed_args_are_replaced_when_pagination_off(self):
+    def test_fall_back_to_original_max_items_when_pagination_turned_off(self):
+        input_tokens = ['max-items']
+        # User specifies --no-paginate.
+        self.parsed_globals.paginate = False
+        # But also specifies --max-items 10, which is normally a pagination arg
+        # we replace.  However, because they've explicitly turned off
+        # pagination, we should put back the original arg.
+        self.parsed_args.max_items = 10
+        shadowed_args = {'max-items': mock.sentinel.ORIGINAL_ARG}
+        arg_table = {'max-items': mock.sentinel.PAGINATION_ARG}
+
+        paginate.check_should_enable_pagination(
+            input_tokens, shadowed_args, arg_table,
+            self.parsed_args, self.parsed_globals)
+
+    def test_shadowed_args_are_replaced_when_pagination_turned_off(self):
         input_tokens = ['foo', 'bar']
         self.parsed_globals.paginate = True
         # Corresponds to --bar 10
@@ -214,3 +286,41 @@ class TestShouldEnablePagination(TestPaginateBase):
         # user specified --bar 10
         self.assertFalse(self.parsed_globals.paginate)
         self.assertEqual(arg_table['foo'], mock.sentinel.ORIGINAL_ARG)
+
+    def test_shadowed_args_are_replaced_when_pagination_set_off(self):
+        input_tokens = ['foo', 'bar']
+        self.parsed_globals.paginate = False
+        # Corresponds to --bar 10
+        self.parsed_args.foo = None
+        self.parsed_args.bar = 10
+        shadowed_args = {'foo': mock.sentinel.ORIGINAL_ARG}
+        arg_table = {'foo': mock.sentinel.PAGINATION_ARG}
+        paginate.check_should_enable_pagination(
+            input_tokens, shadowed_args, arg_table,
+            self.parsed_args, self.parsed_globals)
+        # We should have turned paginate off because the
+        # user specified --bar 10
+        self.assertFalse(self.parsed_globals.paginate)
+        self.assertEqual(arg_table['foo'], mock.sentinel.ORIGINAL_ARG)
+
+
+class TestEnsurePagingParamsNotSet(TestPaginateBase):
+    def setUp(self):
+        super(TestEnsurePagingParamsNotSet, self).setUp()
+        self.parsed_args = mock.Mock()
+
+        self.parsed_args.starting_token = None
+        self.parsed_args.page_size = None
+        self.parsed_args.max_items = None
+
+    def test_pagination_params_raise_error_with_no_paginate(self):
+        self.parsed_args.max_items = 100
+
+        with self.assertRaises(PaginationError):
+            paginate.ensure_paging_params_not_set(self.parsed_args, {})
+
+    def test_can_handle_missing_page_size(self):
+        # Not all pagination operations have a page_size.
+        del self.parsed_args.page_size
+        self.assertIsNone(paginate.ensure_paging_params_not_set(
+            self.parsed_args, {}))

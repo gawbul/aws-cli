@@ -28,7 +28,7 @@ Output::
 
 The following ``sync`` command syncs files in a local directory to objects under a specified prefix and bucket by
 downloading s3 objects.  A s3 object will require downloading if the size of the s3 object differs from the size of the
-local file, the last modified time of the s3 object is older than the last modified time of the local file, or the s3
+local file, the last modified time of the s3 object is newer than the last modified time of the local file, or the s3
 object does not exist in the local directory.  Take note that when objects are downloaded from s3, the last modified
 time of the local file is changed to the last modified time of the s3 object.  In this example, the user syncs the
 current local directory to the bucket ``mybucket``.  The bucket ``mybucket`` contains the objects ``test.txt`` and
@@ -68,7 +68,7 @@ Output::
     upload: test2.txt to s3://mybucket/test2.txt
 
 The following ``sync`` command syncs files under a local directory to objects under a specified prefix and bucket by
-downloading the local files to s3.  This example uses the ``--exclude`` parameter flag to exclude a specified directory
+downloading s3 objects.  This example uses the ``--exclude`` parameter flag to exclude a specified directory
 and s3 prefix from the ``sync`` command.  In this example, the user syncs the local current directory to the bucket
 ``mybucket``.  The local current directory contains the files ``test.txt`` and ``another/test2.txt``.  The bucket
 ``mybucket`` contains the objects ``another/test5.txt`` and ``test1.txt``::
@@ -79,3 +79,6 @@ Output::
 
     download: s3://mybucket/test1.txt to test1.txt
 
+The following ``sync`` command syncs files between two buckets in different regions::
+
+    aws s3 sync s3://my-us-west-2-bucket s3://my-us-east-1-bucket --source-region us-west-2 --region us-east-1

@@ -11,7 +11,6 @@
 # ANY KIND, either express or implied. See the License for the specific
 # language governing permissions and limitations under the License.
 
-from awscli.customizations.commands import BasicCommand
 from awscli.customizations.emr import constants
 from awscli.customizations.emr import emrutils
 from awscli.customizations.emr import hbaseutils
@@ -21,7 +20,8 @@ from awscli.customizations.emr.command import Command
 
 class RestoreFromHBaseBackup(Command):
     NAME = 'restore-from-hbase-backup'
-    DESCRIPTION = ('Restores HBase from S3.')
+    DESCRIPTION = ('Restores HBase from S3. ' +
+                   helptext.AVAILABLE_ONLY_FOR_AMI_VERSIONS)
     ARG_TABLE = [
         {'name': 'cluster-id', 'required': True,
          'help_text': helptext.CLUSTER_ID},
@@ -52,7 +52,8 @@ class RestoreFromHBaseBackup(Command):
 
 class ScheduleHBaseBackup(Command):
     NAME = 'schedule-hbase-backup'
-    DESCRIPTION = ('Adds a step to schedule automated HBase backup.')
+    DESCRIPTION = ('Adds a step to schedule automated HBase backup. ' +
+                   helptext.AVAILABLE_ONLY_FOR_AMI_VERSIONS)
     ARG_TABLE = [
         {'name': 'cluster-id', 'required': True,
          'help_text': helptext.CLUSTER_ID},
@@ -76,8 +77,6 @@ class ScheduleHBaseBackup(Command):
                       ' during the backup process.</p>'}
     ]
 
-    EXAMPLES = BasicCommand.FROM_FILE('emr', 'schedule-hbase-backup.rst')
-
     def _run_main_command(self, parsed_args, parsed_globals):
         steps = []
         self._check_type(parsed_args.type)
@@ -100,14 +99,16 @@ class ScheduleHBaseBackup(Command):
     def _check_type(self, type):
         type = type.lower()
         if type != constants.FULL and type != constants.INCREMENTAL:
-            raise ValueError('aws: error: invalid type. type should be either '
-                             + constants.FULL + ' or ' + constants.INCREMENTAL
-                             + '.')
+            raise ValueError('aws: error: invalid type. '
+                             'type should be either ' +
+                             constants.FULL + ' or ' + constants.INCREMENTAL +
+                             '.')
 
     def _check_unit(self, unit):
         unit = unit.lower()
-        if (unit != constants.MINUTES and unit != constants.HOURS
-                and unit != constants.DAYS):
+        if (unit != constants.MINUTES and
+                unit != constants.HOURS and
+                unit != constants.DAYS):
             raise ValueError('aws: error: invalid unit. unit should be one of'
                              ' the following values: ' + constants.MINUTES +
                              ', ' + constants.HOURS + ' or ' + constants.DAYS +
@@ -148,7 +149,8 @@ class ScheduleHBaseBackup(Command):
 
 class CreateHBaseBackup(Command):
     NAME = 'create-hbase-backup'
-    DESCRIPTION = ('Creates a HBase backup in S3.')
+    DESCRIPTION = ('Creates a HBase backup in S3. ' +
+                   helptext.AVAILABLE_ONLY_FOR_AMI_VERSIONS)
     ARG_TABLE = [
         {'name': 'cluster-id', 'required': True,
          'help_text': helptext.CLUSTER_ID},
@@ -190,7 +192,8 @@ class CreateHBaseBackup(Command):
 
 class DisableHBaseBackups(Command):
     NAME = 'disable-hbase-backups'
-    DESCRIPTION = ('Add a step to disable automated HBase backups.')
+    DESCRIPTION = ('Add a step to disable automated HBase backups. ' +
+                   helptext.AVAILABLE_ONLY_FOR_AMI_VERSIONS)
     ARG_TABLE = [
         {'name': 'cluster-id', 'required': True,
          'help_text': helptext.CLUSTER_ID},

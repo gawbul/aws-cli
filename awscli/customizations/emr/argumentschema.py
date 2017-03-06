@@ -51,6 +51,191 @@ INSTANCE_GROUPS_SCHEMA = {
                 "description": "Target number of Amazon EC2 instances "
                 "for the instance group",
                 "required": True
+            },
+            "EbsConfiguration": {
+                "type": "object",
+                "description": "EBS configuration that will be associated with the instance group.",
+                "properties": {
+                    "EbsOptimized": {
+                        "type": "boolean",
+                        "description": "Boolean flag used to tag EBS-optimized instances.",
+                    },
+                    "EbsBlockDeviceConfigs": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "VolumeSpecification" : {
+                                    "type": "object",
+                                    "description": "The EBS volume specification that will be created and attached to every instance in this instance group.",
+                                    "properties": {
+                                        "VolumeType": {
+                                            "type": "string",
+                                            "description": "The EBS volume type that is attached to all the instances in the instance group. Valid types are: gp2, io1, and standard.",
+                                            "required": True
+                                        },
+                                        "SizeInGB": {
+                                            "type": "integer",
+                                            "description": "The EBS volume size, in GB, that is attached to all the instances in the instance group.",
+                                            "required": True
+                                        },
+                                        "Iops": {
+                                            "type": "integer",
+                                            "description": "The IOPS of the EBS volume that is attached to all the instances in the instance group.",
+                                        }
+                                    }
+                                },
+                                "VolumesPerInstance": {
+                                    "type": "integer",
+                                    "description": "The number of EBS volumes that will be created and attached to each instance in the instance group.",
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "AutoScalingPolicy": {
+                "type": "object",
+                "description": "Auto Scaling policy that will be associated with the instance group.",
+                "properties": {
+                    "Constraints": {
+                        "type": "object",
+                        "description": "The Constraints that will be associated to an Auto Scaling policy.",
+                        "properties": {
+                            "MinCapacity": {
+                                "type": "integer",
+                                "description": "The minimum value for the instances to scale in"
+                                               " to in response to scaling activities."
+                            },
+                            "MaxCapacity": {
+                                "type": "integer",
+                                "description": "The maximum value for the instances to scale out to in response"
+                                               " to scaling activities"
+                            }
+                        }
+                    },
+                    "Rules": {
+                        "type": "array",
+                        "description": "The Rules associated to an Auto Scaling policy.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "Name": {
+                                    "type": "string",
+                                    "description": "Name of the Auto Scaling rule."
+                                },
+                                "Description": {
+                                    "type": "string",
+                                    "description": "Description of the Auto Scaling rule."
+                                },
+                                "Action": {
+                                    "type": "object",
+                                    "description": "The Action associated to an Auto Scaling rule.",
+                                    "properties": {
+                                        "Market": {  # Required for Instance Fleets
+                                            "type": "string",
+                                            "description": "Market type of the Amazon EC2 instances used to create a "
+                                                           "cluster node by Auto Scaling action.",
+                                            "enum": ["ON_DEMAND", "SPOT"]
+                                        },
+                                        "SimpleScalingPolicyConfiguration": {
+                                            "type": "object",
+                                            "description": "The Simple scaling configuration that will be associated"
+                                                           "to Auto Scaling action.",
+                                            "properties": {
+                                                "AdjustmentType": {
+                                                    "type": "string",
+                                                    "description": "Specifies how the ScalingAdjustment parameter is "
+                                                                   "interpreted.",
+                                                    "enum": ["CHANGE_IN_CAPACITY", "PERCENT_CHANGE_IN_CAPACITY",
+                                                             "EXACT_CAPACITY"]
+                                                },
+                                                "ScalingAdjustment": {
+                                                    "type": "integer",
+                                                    "description": "The amount by which to scale, based on the "
+                                                                   "specified adjustment type."
+                                                },
+                                                "CoolDown": {
+                                                    "type": "integer",
+                                                    "description": "The amount of time, in seconds, after a scaling "
+                                                                   "activity completes and before the next scaling "
+                                                                   "activity can start."
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "Trigger": {
+                                    "type": "object",
+                                    "description": "The Trigger associated to an Auto Scaling rule.",
+                                    "properties": {
+                                        "CloudWatchAlarmDefinition": {
+                                            "type": "object",
+                                            "description": "The Alarm to be registered with CloudWatch, to trigger"
+                                                           " scaling activities.",
+                                            "properties": {
+                                                "ComparisonOperator": {
+                                                    "type": "string",
+                                                    "description": "The arithmetic operation to use when comparing the"
+                                                                   " specified Statistic and Threshold."
+                                                },
+                                                "EvaluationPeriods": {
+                                                    "type": "integer",
+                                                    "description": "The number of periods over which data is compared"
+                                                                   " to the specified threshold."
+                                                },
+                                                "MetricName": {
+                                                    "type": "string",
+                                                    "description": "The name for the alarm's associated metric."
+                                                },
+                                                "Namespace": {
+                                                    "type": "string",
+                                                    "description": "The namespace for the alarm's associated metric."
+                                                },
+                                                "Period": {
+                                                    "type": "integer",
+                                                    "description": "The period in seconds over which the specified "
+                                                                   "statistic is applied."
+                                                },
+                                                "Statistic": {
+                                                    "type": "string",
+                                                    "description": "The statistic to apply to the alarm's associated "
+                                                                   "metric."
+                                                },
+                                                "Threshold": {
+                                                    "type": "double",
+                                                    "description": "The value against which the specified statistic is "
+                                                                   "compared."
+                                                },
+                                                "Unit": {
+                                                    "type": "string",
+                                                    "description": "The statistic's unit of measure."
+                                                },
+                                                "Dimensions": {
+                                                    "type": "array",
+                                                    "description": "The dimensions for the alarm's associated metric.",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "Key": {
+                                                                "type": "string",
+                                                                "description": "Dimension Key."
+                                                            },
+                                                            "Value": {
+                                                                "type": "string",
+                                                                "description": "Dimension Value."
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -97,6 +282,10 @@ EC2_ATTRIBUTES_SCHEMA = {
             "type": "string",
             "description": helptext.EMR_MANAGED_SLAVE_SECURITY_GROUP
         },
+        "ServiceAccessSecurityGroup": {
+            "type": "string",
+            "description": helptext.SERVICE_ACCESS_SECURITY_GROUP
+        },
         "AdditionalMasterSecurityGroups": {
             "type": "array",
             "description": helptext.ADDITIONAL_MASTER_SECURITY_GROUPS,
@@ -124,7 +313,7 @@ APPLICATIONS_SCHEMA = {
                 "type": "string",
                 "description": "Application name.",
                 "enum": ["MapR", "HUE", "HIVE", "PIG", "HBASE",
-                         "IMPALA", "GANGLIA"],
+                         "IMPALA", "GANGLIA", "HADOOP", "SPARK"],
                 "required": True
             },
             "Args": {

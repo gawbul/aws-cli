@@ -2,6 +2,195 @@
 CHANGELOG
 =========
 
+1.11.81
+=======
+
+* api-change:``rds``: Update rds command to latest version
+* enhancement:rds: Add command to generate IAM database auth tokens.
+
+
+1.11.80
+=======
+
+* api-change:``kinesis``: Update kinesis command to latest version
+* api-change:``appstream``: Update appstream command to latest version
+
+
+1.11.79
+=======
+
+* api-change:``directconnect``: Update directconnect command to latest version
+* api-change:``kms``: Update kms command to latest version
+* api-change:``route53``: Update route53 command to latest version
+* api-change:``devicefarm``: Update devicefarm command to latest version
+* api-change:``route53domains``: Update route53domains command to latest version
+
+
+1.11.78
+=======
+
+* api-change:``apigateway``: Update apigateway command to latest version
+* api-change:``polly``: Update polly command to latest version
+* api-change:``lambda``: Update lambda command to latest version
+* api-change:``rekognition``: Update rekognition command to latest version
+* api-change:``lex-models``: Update lex-models command to latest version
+* api-change:``ec2``: Update ec2 command to latest version
+* api-change:``iam``: Update iam command to latest version
+* api-change:``codestar``: Update codestar command to latest version
+
+
+1.11.77
+=======
+
+* api-change:``lambda``: Update lambda command to latest version
+* bugfix:configure: Properly use the default profile in ``configure get``
+
+
+1.11.76
+=======
+
+* api-change:``opsworks``: Update opsworks command to latest version
+* api-change:``batch``: Update batch command to latest version
+* api-change:``apigateway``: Update apigateway command to latest version
+* api-change:``gamelift``: Update gamelift command to latest version
+
+
+1.11.75
+=======
+
+* api-change:``redshift``: Update redshift command to latest version
+
+
+1.11.74
+=======
+
+* api-change:``elbv2``: Update elbv2 command to latest version
+
+
+1.11.73
+=======
+
+* api-change:``elasticache``: Update elasticache command to latest version
+
+
+1.11.72
+=======
+
+* api-change:``cloudwatch``: Update cloudwatch command to latest version
+
+
+1.11.71
+=======
+
+* api-change:``lex-runtime``: Update lex-runtime command to latest version
+
+
+1.11.70
+=======
+
+* api-change:``clouddirectory``: Update clouddirectory command to latest version
+
+
+1.11.69
+=======
+
+* api-change:``config``: Update config command to latest version
+* api-change:``resourcegroupstaggingapi``: Update resourcegroupstaggingapi command to latest version
+* api-change:``storagegateway``: Update storagegateway command to latest version
+* api-change:``cloudformation``: Update cloudformation command to latest version
+* api-change:``cloudfront``: Update cloudfront command to latest version
+
+
+1.11.68
+=======
+
+* bugfix:ec2: Fixed a bug causing some ec2 commands to fail with an invalid parameter combination error when arguments were supplied via --cli-input-json. Resolves `#2452 <https://github.com/aws/aws-cli/issues/2452>`__
+* api-change:``batch``: Update batch command to latest version
+* api-change:``ec2``: Update ec2 command to latest version
+
+
+1.11.67
+=======
+
+* api-change:``ssm``: Update ssm command to latest version
+
+
+1.11.66
+=======
+
+* api-change:``application-autoscaling``: Update application-autoscaling command to latest version
+* api-change:``cloudtrail``: Update cloudtrail command to latest version
+
+
+1.11.65
+=======
+
+* api-change:``discovery``: Update discovery command to latest version
+* api-change:``lambda``: Update lambda command to latest version
+
+
+1.11.64
+=======
+
+* api-change:``pinpoint``: Update pinpoint command to latest version
+* api-change:``codebuild``: Update codebuild command to latest version
+* api-change:``rekognition``: Update rekognition command to latest version
+* api-change:``directconnect``: Update directconnect command to latest version
+* api-change:``marketplacecommerceanalytics``: Update marketplacecommerceanalytics command to latest version
+
+
+1.11.63
+=======
+
+* api-change:``events``: Update events command to latest version
+* api-change:``budgets``: Update budgets command to latest version
+* api-change:``rds``: Update rds command to latest version
+* api-change:``apigateway``: Update apigateway command to latest version
+* api-change:``codedeploy``: Update codedeploy command to latest version
+
+
+1.11.62
+=======
+
+* api-change:``events``: Update events command to latest version
+* api-change:``devicefarm``: Update devicefarm command to latest version
+
+
+1.11.61
+=======
+
+* api-change:``emr``: Update emr command to latest version
+* api-change:``codedeploy``: Update codedeploy command to latest version
+
+
+1.11.60
+=======
+
+* api-change:``clouddirectory``: Update clouddirectory command to latest version
+* api-change:``apigateway``: Update apigateway command to latest version
+
+
+1.11.59
+=======
+
+* api-change:``organizations``: Update organizations command to latest version
+* api-change:``workdocs``: Update workdocs command to latest version
+
+
+1.11.58
+=======
+
+* api-change:``rds``: Update rds command to latest version
+
+
+1.11.57
+=======
+
+* api-change:``cloudtrail``: Update cloudtrail command to latest version
+* api-change:``budgets``: Update budgets command to latest version
+* api-change:``opsworkscm``: Update opsworkscm command to latest version
+
+
 1.11.56
 =======
 

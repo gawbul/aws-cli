@@ -62,6 +62,7 @@ from awscli.customizations.paginate import register_pagination
 from awscli.customizations.preview import register_preview_commands
 from awscli.customizations.putmetricdata import register_put_metric_data
 from awscli.customizations.rds import register_rds_modify_split
+from awscli.customizations.rds import register_add_generate_db_auth_token
 from awscli.customizations.removals import register_removals
 from awscli.customizations.route53 import register_create_hosted_zone_doc_fix
 from awscli.customizations.s3.s3 import s3_plugin_initialize
@@ -73,6 +74,7 @@ from awscli.customizations.streamingoutputarg import add_streaming_output_arg
 from awscli.customizations.toplevelbool import register_bool_params
 from awscli.customizations.waiters import register_add_waiters
 from awscli.customizations.opsworkscm import register_alias_opsworks_cm
+from awscli.customizations.mturk import register_alias_mturk_command
 
 
 def awscli_initialize(event_handlers):
@@ -108,6 +110,7 @@ def awscli_initialize(event_handlers):
     register_removals(event_handlers)
     register_preview_commands(event_handlers)
     register_rds_modify_split(event_handlers)
+    register_add_generate_db_auth_token(event_handlers)
     register_put_metric_data(event_handlers)
     register_ses_send_email(event_handlers)
     IAMVMFAWrapper(event_handlers)
@@ -148,3 +151,4 @@ def awscli_initialize(event_handlers):
     register_ec2_page_size_injector(event_handlers)
     cloudformation_init(event_handlers)
     register_alias_opsworks_cm(event_handlers)
+    register_alias_mturk_command(event_handlers)
